@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Portfolio Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://s3.tradingview.com/tv.js"></script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #FFFFFF;
+            font-family: 'Arial', sans-serif;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #F0B90B;
+        }
+        .form-control {
+            background-color: #1E1E1E;
+            color: #FFFFFF;
+            border: 1px solid #333333;
+        }
+        .form-control:focus {
+            border-color: #F0B90B;
+            box-shadow: 0 0 0 0.2rem rgba(240, 185, 11, 0.25);
+        }
+        .btn-primary {
+            background-color: #F0B90B;
+            border-color: #F0B90B;
+            color: #121212;
+        }
+        .btn-primary:hover {
+            background-color: #DAA520;
+            border-color: #DAA520;
+        }
+        .btn-danger {
+            background-color: #DC3545;
+            border-color: #DC3545;
+        }
+        .table-dark {
+            --bs-table-bg: #1E1E1E;
+            --bs-table-striped-bg: #2A2A2A;
+            --bs-table-hover-bg: #333333;
+            color: #FFFFFF;
+            border-color: #333333;
+        }
+        .table th, .table td {
+            border: 1px solid #333333;
+        }
+        .container {
+            max-width: 1200px;
+        }
+        .suggestions {
+            position: absolute;
+            background-color: #1E1E1E;
+            border: 1px solid #333333;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            width: 100%;
+            display: none;
+        }
+        .suggestion-item {
+            padding: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #333333;
+        }
+        .suggestion-item:hover {
+            background-color: #2A2A2A;
+        }
+        .suggestion-item img {
+            width: 30px;
+            height: 30px;
+            margin-right: 10px;
+            border: none;
+        }
+        .suggestion-item span {
+            color: #FFFFFF;
+        }
+        .suggestion-item .symbol {
+            color: #F0B90B;
+            margin-left: 5px;
+        }
+        .portfolio-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .portfolio-row .crypto-input {
+            flex: 2;
+            position: relative;
+        }
+        .portfolio-row .amount-input {
+            flex: 1;
+        }
+        .portfolio-row .remove-btn {
+            align-self: center;
+        }
+        #tradingview-chart {
+            height: 1200px;  /* Ещё увеличена высота графика для лучшей читаемости */
+            resize: vertical;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid #333333;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">Crypto Portfolio Tracker</h1>
+        <form method="POST" class="mb-4" id="portfolio-form">
+            <div class="mb-3">
+                <label class="form-label">Портфель:</label>
+                <div id="portfolio-rows">
+                    {% for item in portfolio_list %}
+                    <div class="portfolio-row">
+                        <div class="crypto-input">
+                            <input type="text" class="form-control crypto-plot" value="{{ item.crypto }}" autocomplete="off">
+                            <div class="suggestions"></div>
+                        </div>
+                        <input type="number" class="form-control amount-input" value="{{ item.amount }}" step="0.01">
+                        <button type="button" class="btn btn-danger btn-sm remove-btn">Удалить</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                <button type="button" id="add-row" class="btn btn-secondary mt-2">Добавить монету</button>
+            </div>
+            <input type="hidden" name="portfolio_input" id="portfolio_input">
+            <div class="mb-3 position-relative">
+                <label class="form-label">Крипта для графика:</label>
+                <input type="text" id="crypto_to_plot" name="crypto_to_plot" value="{{ current_crypto }}" class="form-control crypto-plot" autocomplete="off">
+                <div class="suggestions" id="plot-suggestions"></div>
+            </div>
+            <button type="submit" class="btn btn-primary">Обновить</button>
+        </form>
+        <h2>Детали портфеля:</h2>
+        {{ table|safe }}
+        <h2>Общая стоимость: ${{ "{:.2f}".format(total_value) }} USD</h2>
+        <h2>График:</h2>
+        <div id="tradingview-chart"></div>
+    </div>
+    <script>
+        // TradingView Widget with correct symbol
+        new TradingView.widget({
+            "container_id": "tradingview-chart",
+            "width": "100%",
+            "height": "100%",
+            "symbol": "BINANCE:{{ crypto_symbol }}USDT",
+            "interval": "D",
+            "timezone": "Etc/UTC",
+            "theme": "dark",
+            "style": "1",
+            "locale": "ru",
+            "toolbar_bg": "#1E1E1E",
+            "enable_publishing": false,
+            "allow_symbol_change": true,
+            "studies": ["MASimple@tv-basicstudies"],
+            "show_popup_button": true,
+            "popup_width": "1000",
+            "popup_height": "650"
+        });
+
+        // Make chart draggable
+        function makeDraggable(element) {
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            element.onpointerdown = dragMouseDown;
+            function dragMouseDown(e) {
+                e = e || window.event;
+                e.preventDefault();
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onpointerup = closeDragElement;
+                document.onpointermove = elementDrag;
+            }
+            function elementDrag(e) {
+                e = e || window.event;
+                e.preventDefault();
+                pos1 = pos3 - e.clientX;
+                pos2 = pos4 - e.clientY;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                element.style.top = (element.offsetTop - pos2) + "px";
+                element.style.left = (element.offsetLeft - pos1) + "px";
+            }
+            function closeDragElement() {
+                document.onpointerup = null;
+                document.onpointermove = null;
+            }
+        }
+        makeDraggable(document.getElementById('tradingview-chart'));
+
+        // Rest of the script remains the same
+        function addRow(crypto = '', amount = '') {
+            const row = document.createElement('div');
+            row.classList.add('portfolio-row');
+            row.innerHTML = `
+                <div class="crypto-input">
+                    <input type="text" class="form-control crypto-plot" value="${crypto}" autocomplete="off">
+                    <div class="suggestions"></div>
+                </div>
+                <input type="number" class="form-control amount-input" value="${amount}" step="0.01">
+                <button type="button" class="btn btn-danger btn-sm remove-btn">Удалить</button>
+            `;
+            document.getElementById('portfolio-rows').appendChild(row);
+        }
+
+        {% if not portfolio_list %}
+        addRow();
+        {% endif %}
+
+        document.getElementById('add-row').addEventListener('click', () => addRow());
+
+        document.addEventListener('click', function(event) {
+            if (event.target.classList.contains('remove-btn')) {
+                event.target.closest('.portfolio-row').remove();
+            }
+        });
+
+        document.getElementById('portfolio-form').addEventListener('submit', function() {
+            const rows = document.querySelectorAll('.portfolio-row');
+            const portfolioData = [];
+            rows.forEach(row => {
+                const crypto = row.querySelector('.crypto-plot').value.trim().toLowerCase();
+                const amount = row.querySelector('.amount-input').value.trim();
+                if (crypto && amount) {
+                    portfolioData.push(`${crypto}:${amount}`);
+                }
+            });
+            document.getElementById('portfolio_input').value = portfolioData.join(',');
+        });
+
+        document.addEventListener('input', async function(event) {
+            if (event.target.classList.contains('crypto-plot')) {
+                const input = event.target;
+                const suggestionsDiv = input.nextElementSibling;
+                const query = input.value.trim();
+                if (query.length < 2) {
+                    suggestionsDiv.style.display = 'none';
+                    return;
+                }
+                const response = await fetch(`/search_coins?query=${encodeURIComponent(query)}`);
+                const suggestions = await response.json();
+                suggestionsDiv.innerHTML = '';
+                if (suggestions.length > 0) {
+                    suggestions.forEach(coin => {
+                        const item = document.createElement('div');
+                        item.classList.add('suggestion-item');
+                        item.innerHTML = `
+                            <img src="${coin.thumb}" alt="${coin.symbol}">
+                            <span>${coin.name} <span class="symbol">(${coin.symbol.toUpperCase()})</span></span>
+                        `;
+                        item.addEventListener('click', function() {
+                            input.value = coin.id;
+                            suggestionsDiv.style.display = 'none';
+                        });
+                        suggestionsDiv.appendChild(item);
+                    });
+                    suggestionsDiv.style.display = 'block';
+                } else {
+                    suggestionsDiv.style.display = 'none';
+                }
+            }
+        });
+
+        document.addEventListener('click', function(event) {
+            if (!event.target.classList.contains('crypto-plot')) {
+                document.querySelectorAll('.suggestions').forEach(div => {
+                    div.style.display = 'none';
+                });
+            }
+        });
+    </script>
+</body>
+</html>
